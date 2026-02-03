@@ -576,45 +576,49 @@ elif df_embedded is not None:
                                 st.warning(f"**{friendly_names.get(feature, feature)}**: {feasibility['suggestions'][feature]}")
     
     # MODE 3: ADVANCED CONTROL
-    elif mode == "🔧 Advanced Control":
-        st.header("🔧 Advanced Control")
-        
-        with st.spinner("Generating ranges..."):
-            ranges, sample_count = get_operating_ranges(df_embedded, target_brix, tolerance)
+        elif mode == "🔧 Advanced Control":
+            st.header("🔧 Advanced Control")
             
-            if not ranges.empty:
-                st.success(f"✅ Ranges for Brix = {target_brix}±{tolerance} ({sample_count} samples)")
+            with st.spinner("Generating ranges..."):
+                ranges, sample_count = get_operating_ranges(df_embedded, target_brix, tolerance)
                 
-                display_df = ranges[['P25', 'P40', 'Median', 'Mean', 'P60', 'P75', 'Min', 'Max', 'Std', 'Samples']].copy()
-                
-                display_df.insert(0, 'Feature', [friendly_names.get(f, f) for f in display_df.index])
-                display_df.insert(1, 'Unit', [get_unit(f) for f in ranges.index])
-                display_df.insert(2, 'Importance %', [feature_importance.get(f, 0) * 100 for f in ranges.index])
-                
-                display_df = display_df.sort_values('Importance %', ascending=False)
-                
-                st.dataframe(
-                    display_df.style.format({
-                        'Importance %': '{:.1f}',
-                        'P25': '{:.1f}', 'P40': '{:.1f}', 'Median': '{:.1f}',
-                        'Mean': '{:.1f}', 'P60': '{:.1f}', 'P75': '{:.1f}',
-                        'Min': '{:.1f}', 'Max': '{:.1f}', 'Std': '{:.2f}',
-                        'Samples': '{:.0f}'
-                    }).background_gradient(subset=['Importance %'], cmap='Reds'),
-                    use_container_width=True
-                )
-                
-                csv = display_df.to_csv(index=False)
-                st.download_button(
-                    "📥 Download (CSV)",
-                    data=csv,
-                    file_name=f"ranges_{target_brix}_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            else:
-                st.warning(f"⚠️ Not enough data")
-
+                if not ranges.empty:
+                    st.success(f"✅ Ranges for Brix = {target_brix}±{tolerance} ({sample_count} samples)")
+                    
+                    display_df = ranges[['P25', 'P40', 'Median', 'Mean', 'P60', 'P75', 'Min', 'Max', 'Std', 'Samples']].copy()
+                    
+                    display_df.insert(0, 'Feature', [friendly_names.get(f, f) for f in display_df.index])
+                    display_df.insert(1, 'Unit', [get_unit(f) for f in ranges.index])
+                    display_df.insert(2, 'Importance %', [feature_importance.get(f, 0) * 100 for f in ranges.index])
+                    
+                    display_df = display_df.sort_values('Importance %', ascending=False)
+                    
+                    # Format numbers for display
+                    display_df_formatted = display_df.copy()
+                    display_df_formatted['Importance %'] = display_df_formatted['Importance %'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['P25'] = display_df_formatted['P25'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['P40'] = display_df_formatted['P40'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['Median'] = display_df_formatted['Median'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['Mean'] = display_df_formatted['Mean'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['P60'] = display_df_formatted['P60'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['P75'] = display_df_formatted['P75'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['Min'] = display_df_formatted['Min'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['Max'] = display_df_formatted['Max'].apply(lambda x: f"{x:.1f}")
+                    display_df_formatted['Std'] = display_df_formatted['Std'].apply(lambda x: f"{x:.2f}")
+                    display_df_formatted['Samples'] = display_df_formatted['Samples'].apply(lambda x: f"{int(x)}")
+                    
+                    st.dataframe(display_df_formatted, use_container_width=True)
+                    
+                    csv = display_df.to_csv(index=False)
+                    st.download_button(
+                        "📥 Download (CSV)",
+                        data=csv,
+                        file_name=f"ranges_{target_brix}_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                else:
+                    st.warning(f"⚠️ Not enough data")
 # ─────────────────────────────────────────────────────────────────
 # FOOTER
 # ─────────────────────────────────────────────────────────────────
@@ -624,3 +628,4 @@ st.markdown("""
     🎯 Brix Control Assistant | XGBoost ML | v2.0
 </div>
 """, unsafe_allow_html=True)
+
