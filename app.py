@@ -26,13 +26,17 @@ def load_model():
     try:
         with open('xgboost_brix_model_v2(With_features).pkl', 'rb') as f:
             model_package = pickle.load(f)
-        return model_package, None
+        
+        # Extract training data if available
+        df_embedded = model_package.get('training_data_sample', None)
+        
+        return model_package, df_embedded, None
     except FileNotFoundError:
-        return None, "❌ Model file 'xgboost_brix_model_v2(With_features).pkl' not found in repository"
+        return None, None, "❌ Model file 'xgboost_brix_model_v2(With_features).pkl' not found in repository"
     except Exception as e:
-        return None, f"❌ Error loading model: {str(e)}"
+        return None, None, f"❌ Error loading model: {str(e)}"
 
-model_package, error_msg = load_model()
+model_package, df_embedded, error_msg = load_model()
 
 # ─────────────────────────────────────────────────────────────────
 # FEATURE IMPORTANCE (from your training)
@@ -90,16 +94,6 @@ def get_unit(feature_name):
         if key in feature_name:
             return unit
     return ''
-
-# ─────────────────────────────────────────────────────────────────
-# LOAD EMBEDDED TRAINING DATA (from model package)
-# ─────────────────────────────────────────────────────────────────
-# This is the historical data used during training
-# In production, this would be embedded in the model package or loaded separately
-df_embedded = None  # This will be used by modes 1, 2, 3
-
-# For now, we'll note that modes 1-3 require the training data
-# You would need to embed this in the model_package or load it separately
 
 # ─────────────────────────────────────────────────────────────────
 # HELPER FUNCTIONS
@@ -294,6 +288,12 @@ if model_package is not None:
             st.metric("Last Updated", training_date.split()[0])
         else:
             st.metric("Last Updated", str(training_date)[:10])
+    
+    # Show if training data is embedded
+    if df_embedded is not None:
+        st.success(f"✅ Model loaded with {len(df_embedded):,} training samples")
+    else:
+        st.warning("⚠️ Model loaded (training data not embedded - modes 1-3 limited)")
 else:
     st.error(error_msg if error_msg else "❌ Model not loaded")
     st.info("📤 Please ensure 'xgboost_brix_model_v2(With_features).pkl' is in the repository root")
@@ -306,14 +306,23 @@ st.markdown("---")
 # ─────────────────────────────────────────────────────────────────
 st.sidebar.header("🎛️ Select Mode")
 
-mode = st.sidebar.radio(
-    "Choose operation mode:",
-    [
+# Adjust available modes based on whether training data is available
+if df_embedded is not None:
+    mode_options = [
         "📊 See Typical Settings",
         "🎯 I Have Current Readings",
         "🔧 Advanced Control",
-        "📁 Upload Excel for Live Brix Prediction"  # NEW 4th option
-    ],
+        "📁 Upload Excel for Live Brix Prediction"
+    ]
+else:
+    mode_options = [
+        "📁 Upload Excel for Live Brix Prediction"
+    ]
+    st.sidebar.warning("⚠️ Training data not embedded. Only Mode 4 available.")
+
+mode = st.sidebar.radio(
+    "Choose operation mode:",
+    mode_options,
     index=0
 )
 
@@ -326,8 +335,11 @@ st.sidebar.info(f"""
 **Version:** {model_package.get('version', '1.0')}
 """)
 
+if df_embedded is not None:
+    st.sidebar.success(f"**Training Samples:** {len(df_embedded):,}")
+
 # ─────────────────────────────────────────────────────────────────
-# MODE 4: UPLOAD EXCEL FOR LIVE BRIX PREDICTION (NEW)
+# MODE 4: UPLOAD EXCEL FOR LIVE BRIX PREDICTION
 # ─────────────────────────────────────────────────────────────────
 if mode == "📁 Upload Excel for Live Brix Prediction":
     st.header("📁 Upload Excel for Live Brix Prediction")
@@ -502,31 +514,252 @@ if mode == "📁 Upload Excel for Live Brix Prediction":
         """)
 
 # ─────────────────────────────────────────────────────────────────
-# MODES 1-3: EXISTING FUNCTIONALITY (UNCHANGED)
+# MODES 1-3: EXISTING FUNCTIONALITY (works with embedded training data)
 # ─────────────────────────────────────────────────────────────────
-else:
-    # NOTE: For modes 1-3, you need to load your training data
-    # This would typically be embedded in the model package or loaded from a separate file
+elif df_embedded is not None:
+    # Target settings (for modes 1-3)
+    st.markdown("### 🎯 Target Settings")
     
-    st.warning("⚠️ **Note:** Modes 1-3 require the original training data to calculate operating ranges.")
-    st.info("""
-    **To enable modes 1-3:**
-    1. Load the training data (df) used during model training
-    2. Or embed it in the model package during training
-    3. Or provide it as a separate file
+    col1, col2 = st.columns(2)
+    with col1:
+        target_brix = st.number_input(
+            "Target Brix",
+            min_value=float(df_embedded['Brix'].min()),
+            max_value=float(df_embedded['Brix'].max()),
+            value=93.0,
+            step=0.1
+        )
+    with col2:
+        tolerance = st.number_input(
+            "± Acceptable Range",
+            min_value=0.1,
+            max_value=2.0,
+            value=0.3,
+            step=0.1
+        )
     
-    For now, please use **Mode 4: Upload Excel for Live Brix Prediction** to get predictions on new data.
-    """)
-    
-    # Placeholder for modes 1-3 implementation
     st.markdown("---")
-    st.markdown("### 🚧 Under Construction")
-    st.markdown("""
-    These modes will calculate operating ranges and recommendations based on your training data.
     
-    **Available Mode:**
-    - 📁 Upload Excel for Live Brix Prediction (Mode 4)
-    """)
+    # MODE 1: SEE TYPICAL SETTINGS
+    if mode == "📊 See Typical Settings":
+        st.header("📊 Typical Operating Settings")
+        st.markdown(f"### What parameters should I use to get Brix = **{target_brix}±{tolerance}**?")
+        
+        with st.spinner("Calculating typical settings..."):
+            ranges, sample_count = get_operating_ranges(df_embedded, target_brix, tolerance)
+            
+            if not ranges.empty:
+                st.success(f"✅ Found **{sample_count}** similar situations in training data")
+                
+                st.markdown("### 🎯 Recommended Settings (sorted by impact)")
+                
+                # Sort by importance
+                sorted_features = [f for f in feature_importance.keys() if f in ranges.index]
+                
+                # Display in expandable cards
+                for i, feature in enumerate(sorted_features, 1):
+                    row = ranges.loc[feature]
+                    importance = feature_importance[feature]
+                    
+                    # Impact indicator
+                    if importance > 0.20:
+                        impact = "🔴 HIGH IMPACT"
+                        impact_desc = "Adjust this first if Brix is off-target"
+                        expanded = (i <= 5)
+                    elif importance > 0.10:
+                        impact = "🟡 MEDIUM IMPACT"
+                        impact_desc = "Important for fine-tuning"
+                        expanded = (i <= 3)
+                    else:
+                        impact = "🟢 LOW IMPACT"
+                        impact_desc = "Keep stable, don't change often"
+                        expanded = False
+                    
+                    with st.expander(f"**{i}. {friendly_names.get(feature, feature)}** - {impact}", expanded=expanded):
+                        st.caption(impact_desc)
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("🔽 Low (P25)", f"{row['P25']:.1f} {get_unit(feature)}")
+                            st.caption("Minimum typical value")
+                        with col2:
+                            st.metric("🎯 Normal (Median)", f"{row['Median']:.1f} {get_unit(feature)}")
+                            st.caption("Most common value")
+                        with col3:
+                            st.metric("🔼 High (P75)", f"{row['P75']:.1f} {get_unit(feature)}")
+                            st.caption("Maximum typical value")
+                        
+                        st.info(f"💡 **Operator Tip:** Keep {friendly_names.get(feature, feature)} between **{row['P40']:.1f}** and **{row['P60']:.1f}** {get_unit(feature)} for best results")
+            
+            else:
+                st.warning(f"⚠️ Not enough data found near Brix = {target_brix}±{tolerance}")
+                st.info("💡 Try increasing the tolerance")
+    
+    # MODE 2: I HAVE CURRENT READINGS
+    elif mode == "🎯 I Have Current Readings":
+        st.header("🎯 Guided Mode - Current Readings")
+        st.markdown(f"### I want to reach Brix = **{target_brix}±{tolerance}**. What should I adjust?")
+        
+        st.info("💡 Enter your current readings below. Check only the parameters you can see right now.")
+        
+        # Create input form
+        st.markdown("### 📋 Enter Current Parameter Values")
+        
+        locked_values = {}
+        sorted_features = [f for f in feature_importance.keys() if f in df_embedded.columns]
+        
+        # Use columns for better layout
+        for i in range(0, len(sorted_features[:10]), 2):
+            col1, col2 = st.columns(2)
+            
+            for j, col in enumerate([col1, col2]):
+                if i + j < len(sorted_features[:10]):
+                    feature = sorted_features[i + j]
+                    
+                    with col:
+                        with st.container():
+                            st.markdown(f"**{friendly_names.get(feature, feature)}**")
+                            
+                            use_feature = st.checkbox(
+                                "I have this value",
+                                key=f"check_{feature}",
+                                value=False
+                            )
+                            
+                            if use_feature:
+                                value = st.number_input(
+                                    f"Value ({get_unit(feature)})",
+                                    value=float(df_embedded[feature].median()),
+                                    min_value=float(df_embedded[feature].quantile(0.01)),
+                                    max_value=float(df_embedded[feature].quantile(0.99)),
+                                    step=0.1,
+                                    key=f"value_{feature}"
+                                )
+                                locked_values[feature] = value
+        
+        st.markdown("---")
+        
+        if st.button("🔍 Check Feasibility & Get Recommendations", type="primary", use_container_width=True):
+            if len(locked_values) == 0:
+                st.warning("⚠️ Please check at least one parameter and enter its value")
+            else:
+                with st.spinner("Analyzing your current readings..."):
+                    # Check feasibility
+                    feasibility = check_feasibility(df_embedded, target_brix, locked_values, tolerance)
+                    
+                    st.markdown("### 📊 Current Status")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Current Predicted Brix", f"{feasibility['predicted_brix']:.2f}")
+                    with col2:
+                        st.metric("Target Brix", f"{target_brix:.2f}")
+                    with col3:
+                        delta = feasibility['predicted_brix'] - target_brix
+                        st.metric("Difference", f"{delta:+.2f}", delta=f"{delta:+.2f}", delta_color="inverse")
+                    
+                    st.markdown("---")
+                    
+                    if feasibility['feasible']:
+                        st.success("✅ **GOOD NEWS: Target Brix is ACHIEVABLE with your current settings!**")
+                        
+                        # Show what to keep steady
+                        st.markdown("### 📌 Keep These Steady:")
+                        for feature, value in locked_values.items():
+                            st.markdown(f"✓ **{friendly_names.get(feature, feature)}**: {value:.1f} {get_unit(feature)}")
+                        
+                        # Get conditional ranges
+                        conditional_ranges, sample_count = find_conditional_ranges(df_embedded, target_brix, locked_values, tolerance)
+                        
+                        if not conditional_ranges.empty and sample_count >= 5:
+                            st.markdown(f"### 🎛️ Recommended Settings for Other Parameters")
+                            st.caption(f"*Based on {sample_count} similar situations*")
+                            
+                            # Sort unlocked features by importance
+                            unlocked_sorted = [f for f in feature_importance.keys() 
+                                             if f in conditional_ranges.index]
+                            
+                            for feature in unlocked_sorted[:7]:
+                                if feature in conditional_ranges.index:
+                                    row = conditional_ranges.loc[feature]
+                                    importance = feature_importance[feature]
+                                    
+                                    if importance > 0.15:
+                                        priority = "🔴 HIGH PRIORITY"
+                                    else:
+                                        priority = "🟡 MEDIUM PRIORITY"
+                                    
+                                    with st.expander(f"**{friendly_names.get(feature, feature)}** - {priority}"):
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric("Low", f"{row['P40']:.1f} {get_unit(feature)}")
+                                        with col2:
+                                            st.metric("Target", f"{row['Median']:.1f} {get_unit(feature)}")
+                                        with col3:
+                                            st.metric("High", f"{row['P60']:.1f} {get_unit(feature)}")
+                        else:
+                            st.warning(f"⚠️ Limited data ({sample_count} samples). Try adjusting locked values.")
+                    
+                    else:
+                        st.error("❌ **PROBLEM DETECTED: Target Brix NOT achievable with current settings**")
+                        
+                        st.markdown("### ⚠️ Problems Detected:")
+                        
+                        if feasibility['problematic_features']:
+                            for feature in feasibility['problematic_features']:
+                                suggestion = feasibility['suggestions'].get(feature, 'Adjust this parameter')
+                                st.warning(f"**{friendly_names.get(feature, feature)}**: {suggestion}")
+    
+    # MODE 3: ADVANCED CONTROL
+    elif mode == "🔧 Advanced Control":
+        st.header("🔧 Advanced Control - Full Technical View")
+        
+        with st.spinner("Generating full operating ranges..."):
+            ranges, sample_count = get_operating_ranges(df_embedded, target_brix, tolerance)
+            
+            if not ranges.empty:
+                st.success(f"✅ Operating ranges for Brix = {target_brix}±{tolerance} (based on {sample_count} samples)")
+                
+                # Prepare display dataframe
+                display_df = ranges[['P25', 'P40', 'Median', 'Mean', 'P60', 'P75', 'Min', 'Max', 'Std', 'Samples']].copy()
+                
+                # Add metadata columns
+                display_df.insert(0, 'Feature', [friendly_names.get(f, f) for f in display_df.index])
+                display_df.insert(1, 'Unit', [get_unit(f) for f in ranges.index])
+                display_df.insert(2, 'Importance %', [feature_importance.get(f, 0) * 100 for f in ranges.index])
+                
+                # Sort by importance
+                display_df = display_df.sort_values('Importance %', ascending=False)
+                
+                st.dataframe(
+                    display_df.style.format({
+                        'Importance %': '{:.1f}',
+                        'P25': '{:.1f}',
+                        'P40': '{:.1f}',
+                        'Median': '{:.1f}',
+                        'Mean': '{:.1f}',
+                        'P60': '{:.1f}',
+                        'P75': '{:.1f}',
+                        'Min': '{:.1f}',
+                        'Max': '{:.1f}',
+                        'Std': '{:.2f}',
+                        'Samples': '{:.0f}'
+                    }).background_gradient(subset=['Importance %'], cmap='Reds'),
+                    use_container_width=True
+                )
+                
+                # Download button
+                csv = display_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Operating Ranges (CSV)",
+                    data=csv,
+                    file_name=f"brix_operating_ranges_{target_brix}_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            
+            else:
+                st.warning(f"⚠️ Not enough data found near Brix = {target_brix}±{tolerance}")
 
 # ─────────────────────────────────────────────────────────────────
 # FOOTER
